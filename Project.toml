@@ -9,7 +9,7 @@ Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 Network = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 [sources]
-Network = {path = "../Network"}
+Network = {path = "../Network.jl"}
 
 [compat]
 julia = "1.9"

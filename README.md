@@ -1,5 +1,17 @@
 # NetworkDynamic.jl
 
+
+[![Network Analysis](https://img.shields.io/badge/Network-Analysis-orange.svg)](https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl)
+[![Build Status](https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl/stable/)
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl/dev/)
+[![Julia](https://img.shields.io/badge/Julia-1.9+-purple.svg)](https://julialang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+<p align="center">
+  <img src="docs/src/assets/logo.svg" alt="NetworkDynamic.jl icon" width="160">
+</p>
+
 Dynamic network data structures for Julia.
 
 ## Overview
@@ -12,7 +24,7 @@ This package is a Julia port of the R `networkDynamic` package from the StatNet 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/Statistical-network-analysis-with-Julia/NetworkDynamic.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl")
 ```
 
 ## Features
@@ -145,6 +157,19 @@ spell_overlap(s1, s2)   # Do spells overlap?
 spell_duration(s)       # Duration
 ```
 
+## Documentation
+
+For more detailed documentation, see:
+
+- [Stable Documentation](https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl/stable/)
+- [Development Documentation](https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl/dev/)
+
+## References
+
+1. Butts, C.T. (2023). networkDynamic: Dynamic Extensions for Network Objects. R package. [https://cran.r-project.org/package=networkDynamic](https://cran.r-project.org/package=networkDynamic)
+
+2. Almquist, Z.W., & Butts, C.T. (2014). Logistic Network Regression for Scalable Analysis of Networks with Joint Edge/Vertex Dynamics. *Sociological Methodology*, 44(1), 273-321.
+
 ## License
 
-MIT License
+MIT License - see [LICENSE](LICENSE) for details.

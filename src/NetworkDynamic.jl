@@ -65,7 +65,8 @@ struct Spell{T}
 end
 
 # Convenience constructor for mixed numeric types
-Spell(onset::Real, terminus::Real) = Spell(Float64(onset), Float64(terminus))
+Spell(onset::S, terminus::T; kwargs...) where {S, T} =
+    (P = promote_type(S, T); Spell(P(onset), P(terminus); kwargs...))
 
 # Spell utilities
 Base.:(==)(a::Spell, b::Spell) = a.onset == b.onset && a.terminus == b.terminus
