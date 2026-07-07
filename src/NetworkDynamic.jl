@@ -71,13 +71,38 @@ Spell(onset::S, terminus::T; kwargs...) where {S, T} =
 # Spell utilities
 Base.:(==)(a::Spell, b::Spell) = a.onset == b.onset && a.terminus == b.terminus
 Base.isless(a::Spell, b::Spell) = a.onset < b.onset || (a.onset == b.onset && a.terminus < b.terminus)
+Base.hash(s::Spell, h::UInt) = hash((s.onset, s.terminus), h)
+
+function Base.show(io::IO, s::Spell)
+    cens_l = s.onset_censored ? "(" : "["
+    cens_r = s.terminus_censored ? ")*" : ")"
+    print(io, "Spell", cens_l, s.onset, ", ", s.terminus, cens_r)
+end
+
+# Is the spell active at the single time point `at`? Point (zero-duration)
+# spells [t, t) are treated as instantaneous events active exactly at t,
+# matching R networkDynamic semantics.
+_spell_active_at(s::Spell, at) =
+    (s.onset <= at < s.terminus) || (s.onset == s.terminus == at)
 
 """
     spell_overlap(s1::Spell, s2::Spell) -> Bool
 
-Check if two spells overlap.
+Check if two spells overlap. Half-open interval semantics: touching spells
+`[0,10)` and `[10,20)` do not overlap. Point (zero-duration) spells `[t,t)`
+are instantaneous events: they overlap an interval containing `t` and
+another point spell only at the identical time.
 """
 function spell_overlap(s1::Spell{T}, s2::Spell{T}) where T
+    p1 = s1.onset == s1.terminus
+    p2 = s2.onset == s2.terminus
+    if p1 && p2
+        return s1.onset == s2.onset
+    elseif p1
+        return s2.onset <= s1.onset < s2.terminus
+    elseif p2
+        return s1.onset <= s2.onset < s1.terminus
+    end
     return s1.onset < s2.terminus && s2.onset < s1.terminus
 end
 
@@ -115,37 +140,61 @@ A network with time-varying structure (edges and vertices can appear/disappear).
 - `network::Network{T}`: Base network structure (maximum set of vertices/edges)
 - `vertex_spells::Dict{T, Vector{Spell{Time}}}`: Activity periods for vertices
 - `edge_spells::Dict{Tuple{T,T}, Vector{Spell{Time}}}`: Activity periods for edges
-- `vertex_tea::Dict{Tuple{T,Symbol}, TimeVaryingAttribute}`: Time-varying vertex attributes
-- `edge_tea::Dict{Tuple{Tuple{T,T},Symbol}, TimeVaryingAttribute}`: Time-varying edge attributes
+- `vertex_tea::Dict{Tuple{T,Symbol}, TimeVaryingAttribute{Time}}`: Time-varying vertex attributes
+- `edge_tea::Dict{Tuple{Tuple{T,T},Symbol}, TimeVaryingAttribute{Time}}`: Time-varying edge attributes
 - `observation_period::Tuple{Time, Time}`: Overall observation window
 """
 mutable struct DynamicNetwork{T<:Integer, Time}
     network::Network{T}
     vertex_spells::Dict{T, Vector{Spell{Time}}}
     edge_spells::Dict{Tuple{T,T}, Vector{Spell{Time}}}
-    vertex_tea::Dict{Tuple{T,Symbol}, TimeVaryingAttribute}
-    edge_tea::Dict{Tuple{Tuple{T,T},Symbol}, TimeVaryingAttribute}
+    vertex_tea::Dict{Tuple{T,Symbol}, TimeVaryingAttribute{Time}}
+    edge_tea::Dict{Tuple{Tuple{T,T},Symbol}, TimeVaryingAttribute{Time}}
     observation_period::Tuple{Time, Time}
     net_obs_period::Spell{Time}
 
     function DynamicNetwork{T, Time}(n::Int=0;
-                                     observation_start::Time=zero(Time),
-                                     observation_end::Time=one(Time),
+                                     observation_start=nothing,
+                                     observation_end=nothing,
                                      directed::Bool=true) where {T<:Integer, Time}
+        start = isnothing(observation_start) ? _default_obs_start(Time) :
+                convert(Time, observation_start)
+        stop = isnothing(observation_end) ? _default_obs_end(Time) :
+               convert(Time, observation_end)
         net = Network{T}(; n=n, directed=directed)
         new{T, Time}(
             net,
             Dict{T, Vector{Spell{Time}}}(),
             Dict{Tuple{T,T}, Vector{Spell{Time}}}(),
-            Dict{Tuple{T,Symbol}, TimeVaryingAttribute}(),
-            Dict{Tuple{Tuple{T,T},Symbol}, TimeVaryingAttribute}(),
-            (observation_start, observation_end),
-            Spell(observation_start, observation_end)
+            Dict{Tuple{T,Symbol}, TimeVaryingAttribute{Time}}(),
+            Dict{Tuple{Tuple{T,T},Symbol}, TimeVaryingAttribute{Time}}(),
+            (start, stop),
+            Spell(start, stop)
         )
     end
 end
 
 DynamicNetwork(n::Int=0; kwargs...) = DynamicNetwork{Int, Float64}(n; kwargs...)
+
+# Default observation windows per time type; DateTime/Date have no
+# zero/one, so give them sensible calendar defaults
+_default_obs_start(::Type{Time}) where Time<:Number = zero(Time)
+_default_obs_end(::Type{Time}) where Time<:Number = one(Time)
+_default_obs_start(::Type{DateTime}) = DateTime(0)
+_default_obs_end(::Type{DateTime}) = DateTime(1)
+_default_obs_start(::Type{Date}) = Date(0)
+_default_obs_end(::Type{Date}) = Date(1)
+
+function Base.show(io::IO, dnet::DynamicNetwork{T, Time}) where {T, Time}
+    dir_str = is_directed(dnet) ? "directed" : "undirected"
+    println(io, "DynamicNetwork{$T, $Time}: $dir_str dynamic network")
+    println(io, "  Vertices: $(nv(dnet))")
+    println(io, "  Edges (base): $(ne(dnet))")
+    println(io, "  Observation period: $(dnet.observation_period)")
+    n_vs = sum(length(v) for v in values(dnet.vertex_spells); init=0)
+    n_es = sum(length(v) for v in values(dnet.edge_spells); init=0)
+    print(io, "  Spells: $n_vs vertex, $n_es edge")
+end
 
 # Forward Graphs.jl interface to underlying network
 Graphs.nv(dnet::DynamicNetwork) = nv(dnet.network)
@@ -165,7 +214,8 @@ get_observation_period(dnet::DynamicNetwork) = dnet.observation_period
 
 Set the observation period for the network.
 """
-function set_observation_period!(dnet::DynamicNetwork{T, Time}, start::Time, stop::Time) where {T, Time}
+function set_observation_period!(dnet::DynamicNetwork{T, Time}, start, stop) where {T, Time}
+    start, stop = convert(Time, start), convert(Time, stop)
     dnet.observation_period = (start, stop)
     dnet.net_obs_period = Spell(start, stop)
     return dnet
@@ -208,10 +258,11 @@ end
 
 Convenience function to add a spell from onset to terminus.
 """
-function activate!(dnet::DynamicNetwork{T, Time}, onset::Time, terminus::Time;
+function activate!(dnet::DynamicNetwork{T, Time}, onset, terminus;
                    vertex::Union{Nothing, T}=nothing,
                    edge::Union{Nothing, Tuple{T,T}}=nothing) where {T, Time}
-    add_spell!(dnet, Spell(onset, terminus); vertex=vertex, edge=edge)
+    add_spell!(dnet, Spell(convert(Time, onset), convert(Time, terminus));
+               vertex=vertex, edge=edge)
 end
 
 """
@@ -220,8 +271,8 @@ end
 Activate multiple vertices for a spell.
 """
 function activate_vertices!(dnet::DynamicNetwork{T, Time}, verts::AbstractVector{T},
-                            onset::Time, terminus::Time) where {T, Time}
-    spell = Spell(onset, terminus)
+                            onset, terminus) where {T, Time}
+    spell = Spell(convert(Time, onset), convert(Time, terminus))
     for v in verts
         add_spell!(dnet, spell; vertex=v)
     end
@@ -234,8 +285,8 @@ end
 Activate multiple edges for a spell.
 """
 function activate_edges!(dnet::DynamicNetwork{T, Time}, edges::AbstractVector{Tuple{T,T}},
-                         onset::Time, terminus::Time) where {T, Time}
-    spell = Spell(onset, terminus)
+                         onset, terminus) where {T, Time}
+    spell = Spell(convert(Time, onset), convert(Time, terminus))
     for e in edges
         add_spell!(dnet, spell; edge=e)
     end
@@ -286,7 +337,10 @@ end
 """
     merge_spells!(dnet::DynamicNetwork; vertex=nothing, edge=nothing)
 
-Merge overlapping or adjacent spells for a vertex or edge.
+Merge overlapping or adjacent spells for a vertex or edge. Censoring flags
+are preserved: the merged spell keeps the onset censoring of the spell
+supplying its onset and the terminus censoring of the spell supplying its
+terminus.
 """
 function merge_spells!(dnet::DynamicNetwork{T, Time};
                        vertex::Union{Nothing, T}=nothing,
@@ -294,20 +348,7 @@ function merge_spells!(dnet::DynamicNetwork{T, Time};
     spells = get_spells(dnet; vertex=vertex, edge=edge)
     isempty(spells) && return dnet
 
-    sort!(spells)
-    merged = Spell{Time}[]
-    current = spells[1]
-
-    for i in 2:length(spells)
-        if spells[i].onset <= current.terminus
-            # Overlap or adjacent - extend current
-            current = Spell(current.onset, max(current.terminus, spells[i].terminus))
-        else
-            push!(merged, current)
-            current = spells[i]
-        end
-    end
-    push!(merged, current)
+    merged = _merge_spell_vector(spells)
 
     # Update storage
     if !isnothing(vertex)
@@ -320,6 +361,39 @@ function merge_spells!(dnet::DynamicNetwork{T, Time};
     return dnet
 end
 
+# Merge a (possibly unsorted) spell vector: sort, then coalesce
+# overlapping/adjacent spells, propagating censoring flags.
+function _merge_spell_vector(spells::Vector{Spell{Time}}) where Time
+    sorted = sort(spells)
+    merged = Spell{Time}[]
+    current = sorted[1]
+
+    for i in 2:length(sorted)
+        s = sorted[i]
+        if s.onset <= current.terminus
+            # Overlap or adjacent — extend current, keeping the censoring
+            # flag of whichever spell supplies the merged terminus
+            if s.terminus > current.terminus
+                term, term_cens = s.terminus, s.terminus_censored
+            elseif s.terminus == current.terminus
+                term = current.terminus
+                term_cens = current.terminus_censored || s.terminus_censored
+            else
+                term, term_cens = current.terminus, current.terminus_censored
+            end
+            current = Spell(current.onset, term;
+                            onset_censored=current.onset_censored,
+                            terminus_censored=term_cens)
+        else
+            push!(merged, current)
+            current = s
+        end
+    end
+    push!(merged, current)
+
+    return merged
+end
+
 # =============================================================================
 # Activity Queries
 # =============================================================================
@@ -329,16 +403,23 @@ end
 
 Check if a vertex or edge is active at a given time.
 """
-function is_active(dnet::DynamicNetwork{T, Time}, at::Time;
+const _NO_SPELLS = Dict{DataType, Vector}()
+# Shared empty spell vector per time type; avoids allocating a fresh empty
+# vector on every dictionary miss in hot query loops
+_empty_spells(::Type{Time}) where Time =
+    get!(_NO_SPELLS, Time, Spell{Time}[])::Vector{Spell{Time}}
+
+function is_active(dnet::DynamicNetwork{T, Time}, at;
                    vertex::Union{Nothing, T}=nothing,
                    edge::Union{Nothing, Tuple{T,T}}=nothing) where {T, Time}
+    at = convert(Time, at)
     if !isnothing(vertex)
-        spells = get(dnet.vertex_spells, vertex, Spell{Time}[])
-        return any(s.onset <= at < s.terminus for s in spells)
+        spells = get(dnet.vertex_spells, vertex, _empty_spells(Time))
+        return any(_spell_active_at(s, at) for s in spells)
     elseif !isnothing(edge)
         e = is_directed(dnet.network) ? edge : (min(edge...), max(edge...))
-        spells = get(dnet.edge_spells, e, Spell{Time}[])
-        return any(s.onset <= at < s.terminus for s in spells)
+        spells = get(dnet.edge_spells, e, _empty_spells(Time))
+        return any(_spell_active_at(s, at) for s in spells)
     else
         throw(ArgumentError("Must specify either vertex or edge"))
     end
@@ -350,10 +431,11 @@ end
 Check if a vertex or edge is active during an interval.
 Rule can be :any (active at any point) or :all (active throughout).
 """
-function is_active(dnet::DynamicNetwork{T, Time}, onset::Time, terminus::Time;
+function is_active(dnet::DynamicNetwork{T, Time}, onset, terminus;
                    vertex::Union{Nothing, T}=nothing,
                    edge::Union{Nothing, Tuple{T,T}}=nothing,
                    rule::Symbol=:any) where {T, Time}
+    onset, terminus = convert(Time, onset), convert(Time, terminus)
     spells = get_spells(dnet; vertex=vertex, edge=edge)
 
     if rule == :any
@@ -373,7 +455,8 @@ end
 
 Get all vertices active at time `at`.
 """
-function active_vertices(dnet::DynamicNetwork{T, Time}, at::Time) where {T, Time}
+function active_vertices(dnet::DynamicNetwork{T, Time}, at) where {T, Time}
+    at = convert(Time, at)
     return [v for v in 1:nv(dnet) if is_active(dnet, at; vertex=T(v))]
 end
 
@@ -382,10 +465,11 @@ end
 
 Get all edges active at time `at`.
 """
-function active_edges(dnet::DynamicNetwork{T, Time}, at::Time) where {T, Time}
+function active_edges(dnet::DynamicNetwork{T, Time}, at) where {T, Time}
+    at = convert(Time, at)
     result = Tuple{T,T}[]
     for (edge, spells) in dnet.edge_spells
-        if any(s.onset <= at < s.terminus for s in spells)
+        if any(_spell_active_at(s, at) for s in spells)
             push!(result, edge)
         end
     end
@@ -396,6 +480,10 @@ end
     get_activity_range(dnet::DynamicNetwork; vertex=nothing, edge=nothing) -> Tuple
 
 Get the earliest onset and latest terminus for all spells.
+
+Note: censored spells report their *observed* bounds, so with
+`onset_censored`/`terminus_censored` spells this is the observed, not the
+true, activity range.
 """
 function get_activity_range(dnet::DynamicNetwork{T, Time};
                             vertex::Union{Nothing, T}=nothing,
@@ -427,66 +515,95 @@ when_edge(dnet::DynamicNetwork{T, Time}, i::T, j::T) where {T, Time} = get_spell
 # =============================================================================
 
 """
-    network_extract(dnet::DynamicNetwork, at::Time) -> Network
+    network_extract(dnet::DynamicNetwork, at::Time;
+                    retain_all_vertices=false) -> Network
 
 Extract a static network representing the state at time `at`.
+
+With `retain_all_vertices=true`, all base vertices are kept (inactive ones
+as isolates), so vertex IDs are stable across time slices. With the default
+`retain_all_vertices=false`, inactive vertices are dropped and survivors
+are renumbered densely to `1:k`; each extracted vertex's original ID is
+recorded in the `:vertex_pid` vertex attribute (persistent ID, after R
+networkDynamic's `vertex.pid`) so slices can still be aligned over time.
+
+Static vertex and edge attributes are copied either way.
 """
-function network_extract(dnet::DynamicNetwork{T, Time}, at::Time) where {T, Time}
-    # Get active vertices
-    n = nv(dnet.network)
-    active_verts = [v for v in 1:n if is_active(dnet, at; vertex=T(v))]
-
-    # Create mapping from old to new vertex IDs
-    old_to_new = Dict(v => i for (i, v) in enumerate(active_verts))
-
-    extracted = Network{T}(; n=length(active_verts), directed=is_directed(dnet.network))
-
-    # Add active edges
-    for ((i, j), spells) in dnet.edge_spells
-        if any(s.onset <= at < s.terminus for s in spells)
-            if haskey(old_to_new, i) && haskey(old_to_new, j)
-                add_edge!(extracted, old_to_new[i], old_to_new[j])
-            end
-        end
-    end
-
-    # Copy static vertex attributes
-    for v in active_verts
-        new_v = old_to_new[v]
-        for (attr_name, attr_dict) in dnet.network.vertex_attrs
-            if haskey(attr_dict, v)
-                set_vertex_attribute!(extracted, new_v, attr_name, attr_dict[v])
-            end
-        end
-    end
-
-    return extracted
+function network_extract(dnet::DynamicNetwork{T, Time}, at;
+                         retain_all_vertices::Bool=false) where {T, Time}
+    at = convert(Time, at)
+    edge_active = spells -> any(_spell_active_at(s, at) for s in spells)
+    vert_active = v -> is_active(dnet, at; vertex=T(v))
+    return _extract(dnet, vert_active, edge_active, retain_all_vertices)
 end
 
 """
-    network_extract(dnet::DynamicNetwork, onset::Time, terminus::Time; rule=:any) -> Network
+    network_extract(dnet::DynamicNetwork, onset::Time, terminus::Time;
+                    rule=:any, retain_all_vertices=false) -> Network
 
-Extract a static network representing activity during an interval.
+Extract a static network representing activity during an interval
+(`rule=:any`: active at any point; `rule=:all`: active throughout).
+See the point-query method for `retain_all_vertices` and the `:vertex_pid`
+attribute.
 """
-function network_extract(dnet::DynamicNetwork{T, Time}, onset::Time, terminus::Time;
-                         rule::Symbol=:any) where {T, Time}
+function network_extract(dnet::DynamicNetwork{T, Time}, onset, terminus;
+                         rule::Symbol=:any,
+                         retain_all_vertices::Bool=false) where {T, Time}
+    onset, terminus = convert(Time, onset), convert(Time, terminus)
+    rule in (:any, :all) || throw(ArgumentError("rule must be :any or :all"))
+    query = Spell(onset, terminus)
+    edge_active = spells -> rule == :any ?
+        any(spell_overlap(s, query) for s in spells) :
+        any(s.onset <= onset && s.terminus >= terminus for s in spells)
+    vert_active = v -> is_active(dnet, onset, terminus; vertex=T(v), rule=rule)
+    return _extract(dnet, vert_active, edge_active, retain_all_vertices)
+end
+
+# Shared extraction machinery: `vert_active(v)` and `edge_active(spells)`
+# decide inclusion; vertex/edge attributes are copied; original vertex IDs
+# are preserved (retain_all_vertices) or recorded as :vertex_pid.
+function _extract(dnet::DynamicNetwork{T, Time}, vert_active, edge_active,
+                  retain_all_vertices::Bool) where {T, Time}
     n = nv(dnet.network)
-    active_verts = [v for v in 1:n if is_active(dnet, onset, terminus; vertex=T(v), rule=rule)]
+    active_verts = [T(v) for v in 1:n if vert_active(v)]
 
-    old_to_new = Dict(v => i for (i, v) in enumerate(active_verts))
-
-    extracted = Network{T}(; n=length(active_verts), directed=is_directed(dnet.network))
-
-    for ((i, j), spells) in dnet.edge_spells
-        query = Spell(onset, terminus)
-        active = if rule == :any
-            any(spell_overlap(s, query) for s in spells)
-        else
-            any(s.onset <= onset && s.terminus >= terminus for s in spells)
+    if retain_all_vertices
+        old_to_new = Dict{T,T}(T(v) => T(v) for v in 1:n)
+        extracted = Network{T}(; n=n, directed=is_directed(dnet.network))
+    else
+        old_to_new = Dict{T,T}(v => T(i) for (i, v) in enumerate(active_verts))
+        extracted = Network{T}(; n=length(active_verts),
+                               directed=is_directed(dnet.network))
+        # Persistent IDs: map extracted vertices back to base-network IDs
+        for (old_v, new_v) in old_to_new
+            set_vertex_attribute!(extracted, :vertex_pid, new_v, old_v)
         end
+    end
 
-        if active && haskey(old_to_new, i) && haskey(old_to_new, j)
-            add_edge!(extracted, old_to_new[i], old_to_new[j])
+    active_set = Set(active_verts)
+
+    # Add active edges (only between active endpoints) with attributes
+    for ((i, j), spells) in dnet.edge_spells
+        edge_active(spells) || continue
+        (i in active_set && j in active_set) || continue
+        ni, nj = old_to_new[i], old_to_new[j]
+        add_edge!(extracted, ni, nj)
+        for (attr_name, attr_dict) in dnet.network.edge_attrs
+            key = is_directed(dnet.network) ? (i, j) : minmax(i, j)
+            if haskey(attr_dict, key)
+                set_edge_attribute!(extracted, attr_name, ni, nj, attr_dict[key])
+            end
+        end
+    end
+
+    # Copy static vertex attributes of surviving vertices (all vertices
+    # survive when retain_all_vertices is set)
+    for v in (retain_all_vertices ? [T(v) for v in 1:n] : active_verts)
+        new_v = old_to_new[v]
+        for (attr_name, attr_dict) in dnet.network.vertex_attrs
+            if haskey(attr_dict, v)
+                set_vertex_attribute!(extracted, attr_name, new_v, attr_dict[v])
+            end
         end
     end
 
@@ -498,26 +615,34 @@ end
 
 Extract a sequence of static networks at specified time points.
 """
-function network_slice(dnet::DynamicNetwork{T, Time}, times::AbstractVector{Time}) where {T, Time}
-    return [network_extract(dnet, t) for t in times]
+function network_slice(dnet::DynamicNetwork{T, Time}, times::AbstractVector;
+                       kwargs...) where {T, Time}
+    return [network_extract(dnet, t; kwargs...) for t in times]
 end
 
 """
-    network_collapse(dnet::DynamicNetwork; rule=:any) -> Network
+    network_collapse(dnet::DynamicNetwork; onset=nothing, terminus=nothing,
+                     rule=:any) -> Network
 
-Collapse dynamic network to static by including all vertices/edges that
-were ever active.
+Collapse the dynamic network to a static one. All base vertices are kept
+(vertex IDs are stable); an edge is included if it was ever active — or,
+when `onset`/`terminus` are given, if it was active in that interval under
+`rule` (`:any` or `:all`). Static vertex and edge attributes are copied.
 """
-function network_collapse(dnet::DynamicNetwork{T, Time}; rule::Symbol=:any) where {T, Time}
-    collapsed = Network{T}(; n=nv(dnet.network), directed=is_directed(dnet.network))
-
-    for (edge, spells) in dnet.edge_spells
-        if !isempty(spells)
-            add_edge!(collapsed, edge[1], edge[2])
-        end
+function network_collapse(dnet::DynamicNetwork{T, Time};
+                          onset=nothing, terminus=nothing,
+                          rule::Symbol=:any) where {T, Time}
+    edge_active = if isnothing(onset) || isnothing(terminus)
+        spells -> !isempty(spells)
+    else
+        query = Spell(convert(Time, onset), convert(Time, terminus))
+        rule == :any ?
+            (spells -> any(spell_overlap(s, query) for s in spells)) :
+            (spells -> any(s.onset <= query.onset && s.terminus >= query.terminus
+                           for s in spells))
     end
 
-    return collapsed
+    return _extract(dnet, _ -> true, edge_active, true)
 end
 
 """
@@ -571,14 +696,14 @@ end
 Set a time-varying vertex attribute.
 """
 function set_vertex_attribute_active!(dnet::DynamicNetwork{T, Time}, v::T,
-                                      attr::Symbol, value, onset::Time, terminus::Time) where {T, Time}
+                                      attr::Symbol, value, onset, terminus) where {T, Time}
     key = (v, attr)
     if !haskey(dnet.vertex_tea, key)
         dnet.vertex_tea[key] = TimeVaryingAttribute{Time, typeof(value)}()
     end
     tea = dnet.vertex_tea[key]
     push!(tea.values, value)
-    push!(tea.spells, Spell(onset, terminus))
+    push!(tea.spells, Spell(convert(Time, onset), convert(Time, terminus)))
     return dnet
 end
 
@@ -586,15 +711,17 @@ end
     get_vertex_attribute_active(dnet, v, attr, at) -> value
 
 Get the value of a time-varying vertex attribute at a specific time.
+When several attribute spells cover `at`, the most recently set value wins.
 """
 function get_vertex_attribute_active(dnet::DynamicNetwork{T, Time}, v::T,
-                                     attr::Symbol, at::Time) where {T, Time}
+                                     attr::Symbol, at) where {T, Time}
+    at = convert(Time, at)
     key = (v, attr)
     !haskey(dnet.vertex_tea, key) && return nothing
 
     tea = dnet.vertex_tea[key]
-    for (i, spell) in enumerate(tea.spells)
-        if spell.onset <= at < spell.terminus
+    for i in reverse(eachindex(tea.spells))
+        if _spell_active_at(tea.spells[i], at)
             return tea.values[i]
         end
     end
@@ -607,7 +734,7 @@ end
 Set a time-varying edge attribute.
 """
 function set_edge_attribute_active!(dnet::DynamicNetwork{T, Time}, i::T, j::T,
-                                    attr::Symbol, value, onset::Time, terminus::Time) where {T, Time}
+                                    attr::Symbol, value, onset, terminus) where {T, Time}
     e = is_directed(dnet.network) ? (i, j) : (min(i, j), max(i, j))
     key = (e, attr)
     if !haskey(dnet.edge_tea, key)
@@ -615,7 +742,7 @@ function set_edge_attribute_active!(dnet::DynamicNetwork{T, Time}, i::T, j::T,
     end
     tea = dnet.edge_tea[key]
     push!(tea.values, value)
-    push!(tea.spells, Spell(onset, terminus))
+    push!(tea.spells, Spell(convert(Time, onset), convert(Time, terminus)))
     return dnet
 end
 
@@ -623,16 +750,18 @@ end
     get_edge_attribute_active(dnet, i, j, attr, at) -> value
 
 Get the value of a time-varying edge attribute at a specific time.
+When several attribute spells cover `at`, the most recently set value wins.
 """
 function get_edge_attribute_active(dnet::DynamicNetwork{T, Time}, i::T, j::T,
-                                   attr::Symbol, at::Time) where {T, Time}
+                                   attr::Symbol, at) where {T, Time}
+    at = convert(Time, at)
     e = is_directed(dnet.network) ? (i, j) : (min(i, j), max(i, j))
     key = (e, attr)
     !haskey(dnet.edge_tea, key) && return nothing
 
     tea = dnet.edge_tea[key]
-    for (idx, spell) in enumerate(tea.spells)
-        if spell.onset <= at < spell.terminus
+    for idx in reverse(eachindex(tea.spells))
+        if _spell_active_at(tea.spells[idx], at)
             return tea.values[idx]
         end
     end
@@ -662,16 +791,20 @@ end
 # =============================================================================
 
 """
-    as_dynamic_network(net::Network; onset, terminus) -> DynamicNetwork
+    as_dynamic_network(net::Network; onset=0.0, terminus=1.0) -> DynamicNetwork
 
 Convert a static network to a dynamic network with all elements active
-during the specified period.
+during the specified period. Mixed numeric `onset`/`terminus` types are
+promoted (e.g. `onset=0, terminus=10.0` gives a `Float64` time axis);
+`DateTime`/`Date` values give a calendar time axis.
 """
-function as_dynamic_network(net::Network{T}; onset::Time=0.0, terminus::Time=1.0) where {T, Time}
-    dnet = DynamicNetwork{T, typeof(onset)}(nv(net);
-                                             observation_start=onset,
-                                             observation_end=terminus,
-                                             directed=is_directed(net))
+function as_dynamic_network(net::Network{T}; onset=0.0, terminus=1.0) where T
+    Time = promote_type(typeof(onset), typeof(terminus))
+    onset, terminus = convert(Time, onset), convert(Time, terminus)
+    dnet = DynamicNetwork{T, Time}(Int(nv(net));
+                                   observation_start=onset,
+                                   observation_end=terminus,
+                                   directed=is_directed(net))
 
     spell = Spell(onset, terminus)
 
@@ -718,7 +851,10 @@ function reconcile_activity!(dnet::DynamicNetwork{T, Time}) where {T, Time}
             end
         end
 
-        dnet.edge_spells[edge] = new_spells
+        # The cartesian product can emit overlapping fragments; store a
+        # sorted, merged spell set
+        dnet.edge_spells[edge] = isempty(new_spells) ? new_spells :
+                                 _merge_spell_vector(new_spells)
     end
 
     return dnet

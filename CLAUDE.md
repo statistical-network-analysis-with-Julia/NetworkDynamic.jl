@@ -8,7 +8,7 @@ NetworkDynamic.jl is a Julia port of the R `networkDynamic` package from the Sta
 
 ## Development Commands
 
-- **Run tests:** `julia --project -e 'using Pkg; Pkg.test()'` (no test directory exists yet)
+- **Run tests:** `julia --project -e 'using Pkg; Pkg.test()'`
 - **Build docs:** `julia --project=docs docs/make.jl`
 - **Load package in REPL:** `julia --project -e 'using NetworkDynamic'`
 - **Instantiate dependencies:** `julia --project -e 'using Pkg; Pkg.instantiate()'`
@@ -40,16 +40,19 @@ The entire package lives in a single file: `src/NetworkDynamic.jl`.
 
 ## Key Dependencies
 
-- **Network.jl** -- Local/sibling package (via `[sources]` path dependency at `../Network`); provides the static network type that `DynamicNetwork` wraps.
+- **Network.jl** -- Local/sibling package (via `[sources]` path dependency at `../Network.jl`); provides the static network type that `DynamicNetwork` wraps.
 - **Graphs.jl** -- Julia standard graph interface; `DynamicNetwork` forwards core methods to it.
 - **Dates** -- stdlib; supports `DateTime`/`Date` as timestamp types.
 
 ## Conventions
 
-- Julia 1.9+ required.
+- Julia 1.12+ required (Network.jl cannot load on earlier versions).
 - Mutating functions use `!` suffix (e.g., `activate!`, `reconcile_activity!`).
 - All public API is exported at the top of the module file.
 - Docstrings use the standard Julia triple-quote format with `# Fields` / `# Type Parameters` sections.
 - Spells use half-open intervals: `[onset, terminus)`.
 - The package uses parametric types throughout; generic over vertex ID type and time type.
-- No tests exist yet; `Project.toml` lists `Test` in `[extras]` and `[targets]` but there is no `test/` directory.
+- Behavioral tests live in `test/runtests.jl` (extraction, TEAs, point spells, censoring, DateTime time axes).
+- Point (zero-duration) spells `[t,t)` are instantaneous events, active exactly at `t`.
+- `network_extract` records original vertex IDs in the `:vertex_pid` vertex attribute when it renumbers; `retain_all_vertices=true` keeps IDs stable.
+- TEA lookups return the most recently set matching value when attribute spells overlap.

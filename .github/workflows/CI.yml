@@ -22,8 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.9'
-          - '1.10'
+          # Julia >= 1.12 required by Network.jl
+          - '1.12'
           - '1'
           - 'nightly'
         os:
