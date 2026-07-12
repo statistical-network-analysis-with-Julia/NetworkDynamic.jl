@@ -91,6 +91,8 @@ sort!(spells)
 The most common way to add spells is the `activate!` function:
 
 ```julia
+dnet = DynamicNetwork(5; observation_start=0.0, observation_end=100.0)
+
 # Activate a vertex
 activate!(dnet, 0.0, 50.0; vertex=1)
 

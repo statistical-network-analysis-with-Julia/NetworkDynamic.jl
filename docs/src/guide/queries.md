@@ -86,6 +86,8 @@ println("First active: $(range[1]), Last active: $(range[2])")
 Extract a static `Network` representing the state at a single time:
 
 ```julia
+using Graphs   # nv, ne, and graph algorithms
+
 # Snapshot at t=15
 snapshot = network_extract(dnet, 15.0)
 
@@ -94,7 +96,6 @@ println("Vertices: ", nv(snapshot))
 println("Edges: ", ne(snapshot))
 
 # Use with Graphs.jl algorithms
-using Graphs
 cc = connected_components(snapshot)
 println("Components: ", length(cc))
 ```

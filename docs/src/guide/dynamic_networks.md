@@ -11,6 +11,7 @@ A `DynamicNetwork{T, Time}` wraps a static `Network{T}` with temporal informatio
 
 ### Internal Structure
 
+<!-- skip-check -->
 ```julia
 mutable struct DynamicNetwork{T<:Integer, Time}
     network::Network{T}                                  # Base static network
@@ -194,7 +195,7 @@ Convert an existing static `Network` to a `DynamicNetwork`:
 using Network
 
 # Create static network
-net = Network{Int}(; n=5, directed=true)
+net = network(5; directed=true)
 add_edge!(net, 1, 2)
 add_edge!(net, 2, 3)
 add_edge!(net, 3, 1)

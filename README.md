@@ -5,7 +5,7 @@
 [![Build Status](https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl/stable/)
 [![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl/dev/)
-[![Julia](https://img.shields.io/badge/Julia-1.9+-purple.svg)](https://julialang.org/)
+[![Julia](https://img.shields.io/badge/Julia-1.12+-purple.svg)](https://julialang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
@@ -60,6 +60,7 @@ snapshot = network_extract(dnet, 2.0)
 
 ## Activity Spells
 
+<!-- skip-check -->
 ```julia
 # Add activity spell
 add_spell!(dnet, Spell(0.0, 5.0); vertex=1)
@@ -119,6 +120,7 @@ static = network_collapse(dnet)
 
 ## Time-Varying Attributes
 
+<!-- skip-check -->
 ```julia
 # Set attribute active during spell
 set_vertex_attribute_active!(dnet, v, :status, "infected", 2.0, 5.0)

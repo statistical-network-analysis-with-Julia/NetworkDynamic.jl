@@ -57,6 +57,89 @@ using Dates
         @test is_active(dnet, 5.0; edge=(1, 2)) == false
     end
 
+    @testset "deactivate!" begin
+        dnet = DynamicNetwork(3; observation_start=0.0, observation_end=10.0)
+        activate!(dnet, 0.0, 10.0; vertex=1)
+
+        # Punch a hole: [0,10) minus [3,6) leaves [0,3) and [6,10)
+        deactivate!(dnet, 3.0, 6.0; vertex=1)
+        @test get_spells(dnet; vertex=1) == [Spell(0.0, 3.0), Spell(6.0, 10.0)]
+        @test is_active(dnet, 2.0; vertex=1)
+        @test !is_active(dnet, 4.0; vertex=1)
+        @test is_active(dnet, 7.0; vertex=1)
+
+        # Truncation at the boundaries and full removal
+        activate!(dnet, 0.0, 5.0; edge=(1, 2))
+        deactivate!(dnet, 0.0, 2.0; edge=(1, 2))
+        @test get_spells(dnet; edge=(1, 2)) == [Spell(2.0, 5.0)]
+        deactivate!(dnet, 0.0, 10.0; edge=(1, 2))
+        @test isempty(get_spells(dnet; edge=(1, 2)))
+
+        # Non-overlapping deactivation is a no-op
+        activate!(dnet, 0.0, 2.0; vertex=2)
+        deactivate!(dnet, 5.0, 8.0; vertex=2)
+        @test get_spells(dnet; vertex=2) == [Spell(0.0, 2.0)]
+        # No recorded spells: no-op, no throw
+        deactivate!(dnet, 0.0, 5.0; vertex=3)
+        @test isempty(get_spells(dnet; vertex=3))
+
+        # Censoring flags survive on the fragments
+        dnet2 = DynamicNetwork(2; observation_start=0.0, observation_end=10.0)
+        add_spell!(dnet2, Spell(0.0, 10.0; onset_censored=true,
+                                terminus_censored=true); vertex=1)
+        deactivate!(dnet2, 4.0, 6.0; vertex=1)
+        s = get_spells(dnet2; vertex=1)
+        @test s[1].onset_censored && !s[1].terminus_censored
+        @test !s[2].onset_censored && s[2].terminus_censored
+
+        # Point deactivation removes point spells only
+        dnet3 = DynamicNetwork(2; observation_start=0.0, observation_end=10.0)
+        activate!(dnet3, 5.0, 5.0; edge=(1, 2))   # instantaneous event
+        activate!(dnet3, 0.0, 10.0; vertex=1)
+        deactivate!(dnet3, 5.0, 5.0; edge=(1, 2))
+        deactivate!(dnet3, 5.0, 5.0; vertex=1)
+        @test isempty(get_spells(dnet3; edge=(1, 2)))
+        @test get_spells(dnet3; vertex=1) == [Spell(0.0, 10.0)]
+
+        # DateTime time axis
+        dnet4 = DynamicNetwork{Int, DateTime}(2;
+            observation_start=DateTime(2024, 1, 1),
+            observation_end=DateTime(2024, 12, 31))
+        activate!(dnet4, DateTime(2024, 1, 1), DateTime(2024, 12, 31); vertex=1)
+        deactivate!(dnet4, DateTime(2024, 3, 1), DateTime(2024, 6, 1); vertex=1)
+        @test is_active(dnet4, DateTime(2024, 2, 1); vertex=1)
+        @test !is_active(dnet4, DateTime(2024, 4, 1); vertex=1)
+        @test is_active(dnet4, DateTime(2024, 7, 1); vertex=1)
+
+        @test_throws ArgumentError deactivate!(dnet, 0.0, 1.0)
+    end
+
+    @testset "Mutation counter" begin
+        dnet = DynamicNetwork(3; observation_start=0.0, observation_end=10.0)
+        c0 = dnet.mutation_count
+        activate!(dnet, 0.0, 5.0; vertex=1)
+        @test dnet.mutation_count > c0
+
+        c1 = dnet.mutation_count
+        deactivate!(dnet, 1.0, 2.0; vertex=1)
+        @test dnet.mutation_count > c1
+
+        c2 = dnet.mutation_count
+        activate!(dnet, 0.0, 5.0; edge=(1, 2))
+        remove_spell!(dnet, Spell(0.0, 5.0); edge=(1, 2))
+        merge_spells!(dnet; vertex=1)
+        reconcile_activity!(dnet)
+        set_observation_period!(dnet, 0.0, 20.0)
+        @test dnet.mutation_count >= c2 + 5
+
+        # Queries do not bump the counter
+        c3 = dnet.mutation_count
+        is_active(dnet, 1.5; vertex=1)
+        get_spells(dnet; vertex=1)
+        network_extract(dnet, 1.5)
+        @test dnet.mutation_count == c3
+    end
+
     @testset "Activity queries" begin
         dnet = DynamicNetwork(3; observation_start=0.0, observation_end=10.0)
         activate!(dnet, 0.0, 5.0; vertex=1)
@@ -65,6 +148,13 @@ using Dates
         @test is_active(dnet, 1.0; vertex=1) == true
         @test is_active(dnet, 6.0; vertex=1) == false
         @test is_active(dnet, 3.0; vertex=2) == true
+
+        # Exported spell accessors (R get.vertex.activity/get.edge.activity)
+        @test get_vertex_activity(dnet, 1) == [Spell(0.0, 5.0)]
+        @test get_vertex_activity(dnet, 1) == when_vertex(dnet, 1)
+        activate!(dnet, 1.0, 4.0; edge=(1, 2))
+        @test get_edge_activity(dnet, 1, 2) == [Spell(1.0, 4.0)]
+        @test get_edge_activity(dnet, 1, 2) == when_edge(dnet, 1, 2)
     end
 
     @testset "Point (zero-duration) spells" begin

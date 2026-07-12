@@ -332,7 +332,7 @@ println("Edge spells: ", info.n_edge_spells)
 using Network
 
 # Create a static network
-net = Network{Int}(; n=4, directed=true)
+net = network(4; directed=true)
 add_edge!(net, 1, 2)
 add_edge!(net, 2, 3)
 add_edge!(net, 3, 4)
