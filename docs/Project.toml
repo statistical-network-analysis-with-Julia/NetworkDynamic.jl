@@ -5,7 +5,7 @@ NetworkDynamic = "2ec8e4a1-edb9-4657-8cef-4d333c164b0b"
 
 [sources]
 NetworkDynamic = {path = ".."}
-Network = {url = "https://github.com/statistical-network-analysis-with-Julia/Network.jl.git"}
+Network = {path = "../../Network.jl"}
 
 [compat]
 Documenter = "1"
