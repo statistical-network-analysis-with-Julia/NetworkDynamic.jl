@@ -22,10 +22,19 @@ This package is a Julia port of the R `networkDynamic` package from the StatNet 
 
 ## Installation
 
+Requires Julia 1.12+. NetworkDynamic.jl depends on the unregistered
+[Network.jl](https://github.com/statistical-network-analysis-with-Julia/Network.jl) package, which must be added first:
+
 ```julia
 using Pkg
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl")
 ```
+
+For development, you can instead clone all ecosystem repositories side by
+side (the monorepo layout) and start Julia with the root workspace project
+(`julia --project=.` in the clone root): the `[sources]` path dependencies
+then wire the packages together with no ordered installs needed.
 
 ## Features
 
@@ -136,27 +145,30 @@ w = get_edge_attribute_active(dnet, i, j, :weight, 2.0)
 ## Conversion
 
 ```julia
-# Static to dynamic
-dnet = as_dynamic_network(static_net; onset=0.0, terminus=10.0)
+# Static to dynamic (Network.jl network -> DynamicNetwork)
+using Network
+static_net = network(5)
+add_edge!(static_net, 1, 2)
+dnet2 = as_dynamic_network(static_net; onset=0.0, terminus=10.0)
 
 # Get timing info
-info = get_timing_info(dnet)
+info = get_timing_info(dnet2)
 # (observation_period, data_start, data_end, n_vertex_spells, n_edge_spells)
 
 # Ensure edge activity consistent with vertex activity
-reconcile_activity!(dnet)
+reconcile_activity!(dnet2)
 ```
 
 ## Spell Type
 
 ```julia
 # Create spell
-s = Spell(onset, terminus)
-s = Spell(onset, terminus; onset_censored=true)  # May have started earlier
+s1 = Spell(0.0, 5.0)
+s2 = Spell(3.0, 8.0; onset_censored=true)  # May have started earlier
 
 # Spell operations
-spell_overlap(s1, s2)   # Do spells overlap?
-spell_duration(s)       # Duration
+spell_overlap(s1, s2)   # Do spells overlap? -> true
+spell_duration(s1)      # Duration -> 5.0
 ```
 
 ## Documentation

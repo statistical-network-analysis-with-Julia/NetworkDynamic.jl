@@ -8,7 +8,8 @@ Install NetworkDynamic.jl from GitHub:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/Statistical-network-analysis-with-Julia/NetworkDynamic.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl")
 ```
 
 ## Basic Workflow
@@ -71,7 +72,7 @@ For calendar-based timestamps:
 ```julia
 using Dates
 
-dnet = DynamicNetwork{Int, DateTime}(10;
+dnet_dt = DynamicNetwork{Int, DateTime}(10;
     observation_start=DateTime(2024, 1, 1),
     observation_end=DateTime(2024, 12, 31)
 )
@@ -193,6 +194,8 @@ spells = when_edge(dnet, 1, 2)
 ### At a Single Time Point
 
 ```julia
+using Network   # for nv/ne on the extracted static network
+
 # Extract static network at time 25
 snapshot = network_extract(dnet, 25.0)
 

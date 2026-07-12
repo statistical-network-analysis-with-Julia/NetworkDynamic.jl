@@ -77,14 +77,14 @@ For undirected networks, edge keys are normalized so that `(min(i,j), max(i,j))`
 ```julia
 using Dates
 
-dnet = DynamicNetwork{Int, DateTime}(20;
+dnet_dt = DynamicNetwork{Int, DateTime}(20;
     observation_start=DateTime(2024, 1, 1),
     observation_end=DateTime(2024, 12, 31)
 )
 
 # Add activity spells with DateTime
-activate!(dnet, DateTime(2024, 1, 1), DateTime(2024, 6, 30); vertex=1)
-activate!(dnet, DateTime(2024, 3, 1), DateTime(2024, 9, 30); edge=(1, 2))
+activate!(dnet_dt, DateTime(2024, 1, 1), DateTime(2024, 6, 30); vertex=1)
+activate!(dnet_dt, DateTime(2024, 3, 1), DateTime(2024, 9, 30); edge=(1, 2))
 ```
 
 ### With Date Timestamps
@@ -92,12 +92,12 @@ activate!(dnet, DateTime(2024, 3, 1), DateTime(2024, 9, 30); edge=(1, 2))
 ```julia
 using Dates
 
-dnet = DynamicNetwork{Int, Date}(10;
+dnet_date = DynamicNetwork{Int, Date}(10;
     observation_start=Date(2024, 1, 1),
     observation_end=Date(2024, 12, 31)
 )
 
-activate!(dnet, Date(2024, 1, 1), Date(2024, 6, 30); vertex=1)
+activate!(dnet_date, Date(2024, 1, 1), Date(2024, 6, 30); vertex=1)
 ```
 
 ## The Observation Period
@@ -275,8 +275,12 @@ When you have a sequence of static networks at fixed time points:
 
 ```julia
 using Network
+using Graphs: src, dst
 
 # Suppose you have networks at times 1, 2, 3
+net_t1 = network(10); add_edge!(net_t1, 1, 2)
+net_t2 = network(10); add_edge!(net_t2, 1, 2); add_edge!(net_t2, 2, 3)
+net_t3 = network(10); add_edge!(net_t3, 2, 3)
 nets = [net_t1, net_t2, net_t3]
 n = nv(nets[1])
 
