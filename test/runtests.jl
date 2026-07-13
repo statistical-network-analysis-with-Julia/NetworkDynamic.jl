@@ -1,5 +1,5 @@
 using NetworkDynamic
-using Network
+using Networks
 using Test
 using Graphs
 using Dates
@@ -364,5 +364,216 @@ using Dates
         @test get_observation_period(dnet) == (0.0, 5.0)
         set_observation_period!(dnet, 1.0, 10.0)
         @test get_observation_period(dnet) == (1.0, 10.0)
+    end
+
+    # =========================================================================
+    # Conversion invariants (see docs/src/guide/conversion_invariants.md)
+    #
+    # The contract: everything the target representation can hold survives;
+    # what it cannot hold is rejected or reported, never silently dropped.
+    # The missing-dyad mask is the field that used to vanish — a masked dyad
+    # round-tripped to zero masked dyads, which is the exact failure mode the
+    # ecosystem missing-data contract exists to prevent.
+    # =========================================================================
+
+    # A network exercising every field the contract names: directedness,
+    # loops + a self-loop, isolates, vertex/edge/network attributes, and both
+    # flavours of masked dyad (one with a PRESENT face value, one ABSENT).
+    function _kitchen_sink(; directed::Bool)
+        net = network(6; directed=directed, loops=true)
+        add_edge!(net, 1, 2)
+        add_edge!(net, 2, 3)
+        add_edge!(net, 3, 3)             # self-loop
+        # vertices 5, 6 are isolates
+        set_vertex_attribute!(net, :grp, 1, "a")
+        set_vertex_attribute!(net, :grp, 5, "b")   # isolate carries an attribute
+        set_edge_attribute!(net, :weight, 1, 2, 2.5)
+        set_network_attribute!(net, :title, "kitchen sink")
+        set_missing_dyad!(net, 2, 3)     # masked, PRESENT face value
+        set_missing_dyad!(net, 4, 5)     # masked, ABSENT face value
+        return net
+    end
+
+    @testset "Conversion invariants: Network → DynamicNetwork is lossless" begin
+        for directed in (true, false)
+            net = _kitchen_sink(; directed=directed)
+            dnet, rep = as_dynamic_network(net; onset=0.0, terminus=10.0,
+                                           report=true)
+
+            @test is_lossless(rep)
+            @test isempty(dropped_fields(rep))
+
+            base = dnet.network
+            @test is_directed(base) == directed
+            @test base.loops
+            @test nv(base) == 6
+            @test has_edge(base, 3, 3)                     # self-loop survived
+            @test get_vertex_attribute(base, :grp, 1) == "a"
+            @test get_vertex_attribute(base, :grp, 5) == "b"
+            @test get_edge_attribute(base, :weight, 1, 2) == 2.5
+            @test get_network_attribute(base, :title) == "kitchen sink"
+
+            # The mask survives — both the present-face and the absent-face
+            # masked dyad, and neither turned into a tie or a non-tie.
+            @test n_missing_dyads(base) == 2
+            @test is_missing_dyad(base, 2, 3)
+            @test is_missing_dyad(base, 4, 5)
+            @test has_edge(base, 2, 3)                     # present face value
+            @test !has_edge(base, 4, 5)                    # absent face value
+
+            # Every vertex and edge active for the whole observation window
+            @test get_observation_period(dnet) == (0.0, 10.0)
+            @test all(is_active(dnet, 5.0; vertex=v) for v in 1:6)
+            @test is_active(dnet, 5.0; edge=(3, 3))
+        end
+    end
+
+    @testset "Conversion invariants: Network → DynamicNetwork → Network round-trip" begin
+        for directed in (true, false)
+            net = _kitchen_sink(; directed=directed)
+            back = network_collapse(as_dynamic_network(net; onset=0.0, terminus=10.0))
+
+            @test is_directed(back) == directed
+            @test back.loops
+            @test nv(back) == nv(net)
+            @test ne(back) == ne(net)
+            @test Set((src(e), dst(e)) for e in edges(back)) ==
+                  Set((src(e), dst(e)) for e in edges(net))
+            @test has_edge(back, 3, 3)
+            @test get_vertex_attribute(back, :grp, 1) == "a"
+            @test get_vertex_attribute(back, :grp, 5) == "b"
+            @test get_edge_attribute(back, :weight, 1, 2) == 2.5
+            @test get_network_attribute(back, :title) == "kitchen sink"
+
+            # THE regression: the mask must not round-trip to zero.
+            @test n_missing_dyads(back) == 2
+            @test is_missing_dyad(back, 2, 3)
+            @test is_missing_dyad(back, 4, 5)
+            @test has_edge(back, 2, 3) && !has_edge(back, 4, 5)
+        end
+    end
+
+    @testset "Conversion invariants: two-mode metadata" begin
+        bp = network(5; bipartite=2)
+        add_edge!(bp, 1, 3)
+        add_edge!(bp, 2, 5)
+        set_missing_dyad!(bp, 1, 4)
+        dnet = as_dynamic_network(bp; onset=0.0, terminus=10.0)
+
+        @test dnet.network.bipartite == 2
+        @test is_two_mode(dnet.network)
+
+        # Stable IDs: the mode partition is meaningful and is preserved.
+        collapsed, rep = network_collapse(dnet; report=true)
+        @test collapsed.bipartite == 2
+        @test n_missing_dyads(collapsed) == 1
+        @test !(:bipartite in dropped_fields(rep))
+
+        keep, rep_keep = network_extract(dnet, 5.0; retain_all_vertices=true,
+                                         report=true)
+        @test keep.bipartite == 2
+        @test !(:bipartite in dropped_fields(rep_keep))
+
+        # Renumbering destroys "vertices 1:k are mode 1" — dropped, and SAID so.
+        renum, rep_renum = network_extract(dnet, 5.0; retain_all_vertices=false,
+                                           report=true)
+        @test isnothing(renum.bipartite)
+        @test :bipartite in dropped_fields(rep_renum)
+    end
+
+    @testset "Conversion invariants: network_extract preserves what it can" begin
+        for directed in (true, false)
+            net = _kitchen_sink(; directed=directed)
+            dnet = as_dynamic_network(net; onset=0.0, terminus=10.0)
+
+            snap, rep = network_extract(dnet, 5.0; retain_all_vertices=true,
+                                        report=true)
+            @test is_directed(snap) == directed
+            @test snap.loops
+            @test has_edge(snap, 3, 3)
+            @test get_vertex_attribute(snap, :grp, 1) == "a"
+            @test get_edge_attribute(snap, :weight, 1, 2) == 2.5
+            @test get_network_attribute(snap, :title) == "kitchen sink"
+            @test n_missing_dyads(snap) == 2
+            @test is_missing_dyad(snap, 2, 3) && is_missing_dyad(snap, 4, 5)
+
+            # A snapshot has no time axis: that IS lossy, and the report says so.
+            @test !is_lossless(rep)
+            @test :spells in dropped_fields(rep)
+            @test :observation_period in dropped_fields(rep)
+            @test !(:missing_dyads in dropped_fields(rep))   # nothing lost here
+        end
+    end
+
+    @testset "Conversion invariants: mask entries on inactive vertices are reported" begin
+        dnet = DynamicNetwork(4; observation_start=0.0, observation_end=10.0)
+        activate!(dnet, 0.0, 10.0; vertex=1)
+        activate!(dnet, 0.0, 10.0; vertex=2)
+        activate!(dnet, 0.0, 10.0; edge=(1, 2))
+        # Vertices 3 and 4 are never active
+        set_missing_dyad!(dnet.network, 3, 4)
+        set_missing_dyad!(dnet.network, 1, 2)
+
+        # Renumbering drops vertices 3, 4 — so their masked dyad cannot be
+        # carried. It is not silently forgotten.
+        renum, rep = network_extract(dnet, 5.0; retain_all_vertices=false,
+                                     report=true)
+        @test nv(renum) == 2
+        @test n_missing_dyads(renum) == 1              # (1,2) survives, remapped
+        @test is_missing_dyad(renum, 1, 2)
+        @test :missing_dyads in dropped_fields(rep)
+
+        # Keeping all vertices keeps the whole mask.
+        keep, rep_keep = network_extract(dnet, 5.0; retain_all_vertices=true,
+                                         report=true)
+        @test n_missing_dyads(keep) == 2
+        @test !(:missing_dyads in dropped_fields(rep_keep))
+    end
+
+    @testset "Conversion invariants: TEA drop is reported only when TEAs exist" begin
+        dnet = DynamicNetwork(3; observation_start=0.0, observation_end=10.0)
+        activate_vertices!(dnet, [1, 2, 3], 0.0, 10.0)
+        activate!(dnet, 0.0, 10.0; edge=(1, 2))
+
+        _, rep = network_extract(dnet, 5.0; retain_all_vertices=true, report=true)
+        @test !(:time_varying_attributes in dropped_fields(rep))
+
+        set_vertex_attribute_active!(dnet, 1, :mood, "up", 0.0, 5.0)
+        _, rep2 = network_extract(dnet, 2.0; retain_all_vertices=true, report=true)
+        @test :time_varying_attributes in dropped_fields(rep2)
+    end
+
+    @testset "Conversion invariants: temporal edge cases" begin
+        dnet = DynamicNetwork(5; observation_start=0.0, observation_end=10.0)
+        activate_vertices!(dnet, [1, 2, 3, 4, 5], 0.0, 10.0)
+        # Overlapping spells on one edge
+        activate!(dnet, 0.0, 6.0; edge=(1, 2))
+        activate!(dnet, 4.0, 10.0; edge=(1, 2))
+        # Point spell: an instantaneous contact at t = 7
+        activate!(dnet, 7.0, 7.0; edge=(2, 3))
+        # A spell flush with the observation-window edges
+        activate!(dnet, 0.0, 10.0; edge=(3, 4))
+        # Vertex 5 is an isolate throughout
+
+        # Overlapping spells: the edge is active across the union, including
+        # the overlap, and collapsing it yields exactly one edge.
+        @test has_edge(network_extract(dnet, 5.0; retain_all_vertices=true), 1, 2)
+        @test has_edge(network_extract(dnet, 8.0; retain_all_vertices=true), 1, 2)
+        collapsed = network_collapse(dnet)
+        @test ne(collapsed) == 3
+        @test nv(collapsed) == 5                       # the isolate survives
+
+        # Point spell: present exactly at its instant, nowhere else.
+        @test has_edge(network_extract(dnet, 7.0; retain_all_vertices=true), 2, 3)
+        @test !has_edge(network_extract(dnet, 6.99; retain_all_vertices=true), 2, 3)
+        @test !has_edge(network_extract(dnet, 7.01; retain_all_vertices=true), 2, 3)
+
+        # Observation-window edges: [0,10) is half-open at the terminus.
+        @test has_edge(network_extract(dnet, 0.0; retain_all_vertices=true), 3, 4)
+        @test !has_edge(network_extract(dnet, 10.0; retain_all_vertices=true), 3, 4)
+
+        # network_slice is a vector of networks, so it has no single report.
+        @test length(network_slice(dnet, [0.0, 5.0, 7.0])) == 3
+        @test_throws ArgumentError network_slice(dnet, [0.0]; report=true)
     end
 end

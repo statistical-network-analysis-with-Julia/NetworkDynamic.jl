@@ -10,7 +10,8 @@ module NetworkDynamic
 
 using Dates
 using Graphs
-using Network
+using Networks
+using Networks: ConversionReport, record_drop!, require_observed
 
 # Core types
 export DynamicNetwork, Spell, TimeVaryingAttribute
@@ -593,7 +594,7 @@ get_edge_activity(dnet::DynamicNetwork{T, Time}, i::T, j::T) where {T, Time} =
 
 """
     network_extract(dnet::DynamicNetwork, at::Time;
-                    retain_all_vertices=false) -> Network
+                    retain_all_vertices=false, report=false) -> Network
 
 Extract a static network representing the state at time `at`.
 
@@ -604,28 +605,41 @@ are renumbered densely to `1:k`; each extracted vertex's original ID is
 recorded in the `:vertex_pid` vertex attribute (persistent ID, after R
 networkDynamic's `vertex.pid`) so slices can still be aligned over time.
 
-Static vertex and edge attributes are copied either way.
+# Conversion invariants
+
+Preserved either way: directedness, the `loops` flag, static vertex, edge and
+network attributes, and the **missing-dyad mask** (an unobserved dyad of the
+base network is unobserved in every snapshot of it — it does not silently
+become an absent tie). Two-mode metadata survives only under
+`retain_all_vertices=true`; renumbering destroys the mode partition.
+
+Inherently dropped (a static network has no time axis): spells, time-varying
+attributes, and the observation period. Pass `report=true` to get
+`(net, ::Networks.ConversionReport)` naming everything the extraction dropped.
 """
 function network_extract(dnet::DynamicNetwork{T, Time}, at;
-                         retain_all_vertices::Bool=false) where {T, Time}
+                         retain_all_vertices::Bool=false,
+                         report::Bool=false) where {T, Time}
     at = convert(Time, at)
     edge_active = spells -> any(_spell_active_at(s, at) for s in spells)
     vert_active = v -> is_active(dnet, at; vertex=T(v))
-    return _extract(dnet, vert_active, edge_active, retain_all_vertices)
+    net, rep = _extract(dnet, vert_active, edge_active, retain_all_vertices)
+    return report ? (net, rep) : net
 end
 
 """
     network_extract(dnet::DynamicNetwork, onset::Time, terminus::Time;
-                    rule=:any, retain_all_vertices=false) -> Network
+                    rule=:any, retain_all_vertices=false, report=false) -> Network
 
 Extract a static network representing activity during an interval
 (`rule=:any`: active at any point; `rule=:all`: active throughout).
-See the point-query method for `retain_all_vertices` and the `:vertex_pid`
-attribute.
+See the point-query method for `retain_all_vertices`, the `:vertex_pid`
+attribute, and the conversion invariants.
 """
 function network_extract(dnet::DynamicNetwork{T, Time}, onset, terminus;
                          rule::Symbol=:any,
-                         retain_all_vertices::Bool=false) where {T, Time}
+                         retain_all_vertices::Bool=false,
+                         report::Bool=false) where {T, Time}
     onset, terminus = convert(Time, onset), convert(Time, terminus)
     rule in (:any, :all) || throw(ArgumentError("rule must be :any or :all"))
     query = Spell(onset, terminus)
@@ -633,24 +647,38 @@ function network_extract(dnet::DynamicNetwork{T, Time}, onset, terminus;
         any(spell_overlap(s, query) for s in spells) :
         any(s.onset <= onset && s.terminus >= terminus for s in spells)
     vert_active = v -> is_active(dnet, onset, terminus; vertex=T(v), rule=rule)
-    return _extract(dnet, vert_active, edge_active, retain_all_vertices)
+    net, rep = _extract(dnet, vert_active, edge_active, retain_all_vertices)
+    return report ? (net, rep) : net
 end
 
 # Shared extraction machinery: `vert_active(v)` and `edge_active(spells)`
-# decide inclusion; vertex/edge attributes are copied; original vertex IDs
-# are preserved (retain_all_vertices) or recorded as :vertex_pid.
+# decide inclusion. Everything the static target can hold is carried across —
+# directedness, loops, two-mode metadata (when IDs are stable), vertex/edge/
+# network attributes, and the missing-dyad mask; what a static network cannot
+# hold is named in the returned ConversionReport. Original vertex IDs are
+# preserved (retain_all_vertices) or recorded as :vertex_pid.
 function _extract(dnet::DynamicNetwork{T, Time}, vert_active, edge_active,
                   retain_all_vertices::Bool) where {T, Time}
-    n = nv(dnet.network)
+    base = dnet.network
+    n = nv(base)
     active_verts = [T(v) for v in 1:n if vert_active(v)]
+    rep = ConversionReport(:DynamicNetwork, :Network)
 
     if retain_all_vertices
         old_to_new = Dict{T,T}(T(v) => T(v) for v in 1:n)
-        extracted = Network{T}(; n=n, directed=is_directed(dnet.network))
+        extracted = Network{T}(; n=n, directed=is_directed(base),
+                               loops=base.loops, bipartite=base.bipartite)
     else
         old_to_new = Dict{T,T}(v => T(i) for (i, v) in enumerate(active_verts))
+        # Renumbering to 1:k destroys the "vertices 1:k are mode 1" invariant
+        # that the two-mode flag encodes, so it cannot be carried.
+        if !isnothing(base.bipartite)
+            record_drop!(rep, :bipartite,
+                         "two-mode metadata cannot survive vertex renumbering; " *
+                         "pass retain_all_vertices=true to keep it")
+        end
         extracted = Network{T}(; n=length(active_verts),
-                               directed=is_directed(dnet.network))
+                               directed=is_directed(base), loops=base.loops)
         # Persistent IDs: map extracted vertices back to base-network IDs
         for (old_v, new_v) in old_to_new
             set_vertex_attribute!(extracted, :vertex_pid, new_v, old_v)
@@ -665,8 +693,8 @@ function _extract(dnet::DynamicNetwork{T, Time}, vert_active, edge_active,
         (i in active_set && j in active_set) || continue
         ni, nj = old_to_new[i], old_to_new[j]
         add_edge!(extracted, ni, nj)
-        for (attr_name, attr_dict) in dnet.network.edge_attrs
-            key = is_directed(dnet.network) ? (i, j) : minmax(i, j)
+        for (attr_name, attr_dict) in base.edge_attrs
+            key = is_directed(base) ? (i, j) : minmax(i, j)
             if haskey(attr_dict, key)
                 set_edge_attribute!(extracted, attr_name, ni, nj, attr_dict[key])
             end
@@ -677,38 +705,85 @@ function _extract(dnet::DynamicNetwork{T, Time}, vert_active, edge_active,
     # survive when retain_all_vertices is set)
     for v in (retain_all_vertices ? [T(v) for v in 1:n] : active_verts)
         new_v = old_to_new[v]
-        for (attr_name, attr_dict) in dnet.network.vertex_attrs
+        for (attr_name, attr_dict) in base.vertex_attrs
             if haskey(attr_dict, v)
                 set_vertex_attribute!(extracted, attr_name, new_v, attr_dict[v])
             end
         end
     end
 
-    return extracted
+    # Network-level attributes are representable and therefore copied.
+    for (attr_name, val) in base.network_attrs
+        set_network_attribute!(extracted, attr_name, val)
+    end
+
+    # The missing-dyad mask: an unobserved dyad of the base network stays
+    # unobserved in the snapshot. Entries whose endpoints did not survive the
+    # extraction cannot be represented and are reported, never silently lost.
+    n_mask_dropped = 0
+    for (i, j) in missing_dyads(base)
+        if (i in active_set || retain_all_vertices) &&
+           (j in active_set || retain_all_vertices)
+            set_missing_dyad!(extracted, old_to_new[i], old_to_new[j])
+        else
+            n_mask_dropped += 1
+        end
+    end
+    if n_mask_dropped > 0
+        record_drop!(rep, :missing_dyads,
+                     "$n_mask_dropped masked dyad(s) have an endpoint that is " *
+                     "inactive in this extraction and were not carried; pass " *
+                     "retain_all_vertices=true to keep the whole mask")
+    end
+
+    record_drop!(rep, :spells,
+                 "a static network has no time axis; vertex and edge activity " *
+                 "spells are collapsed to presence/absence")
+    if !isempty(dnet.vertex_tea) || !isempty(dnet.edge_tea)
+        record_drop!(rep, :time_varying_attributes,
+                     "time-varying (TEA) attribute values are not copied; read " *
+                     "them with get_vertex_attribute_active/get_edge_attribute_active")
+    end
+    record_drop!(rep, :observation_period,
+                 "the observation window $(dnet.observation_period) has no static " *
+                 "counterpart")
+
+    return extracted, rep
 end
 
 """
     network_slice(dnet::DynamicNetwork, times::AbstractVector) -> Vector{Network}
 
-Extract a sequence of static networks at specified time points.
+Extract a sequence of static networks at specified time points. Keyword
+arguments are forwarded to [`network_extract`](@ref) (`report=true` is not
+meaningful here and is rejected).
 """
 function network_slice(dnet::DynamicNetwork{T, Time}, times::AbstractVector;
-                       kwargs...) where {T, Time}
+                       report::Bool=false, kwargs...) where {T, Time}
+    report && throw(ArgumentError(
+        "network_slice returns a vector of networks; call network_extract " *
+        "directly for a per-slice ConversionReport"))
     return [network_extract(dnet, t; kwargs...) for t in times]
 end
 
 """
     network_collapse(dnet::DynamicNetwork; onset=nothing, terminus=nothing,
-                     rule=:any) -> Network
+                     rule=:any, report=false) -> Network
 
 Collapse the dynamic network to a static one. All base vertices are kept
 (vertex IDs are stable); an edge is included if it was ever active — or,
 when `onset`/`terminus` are given, if it was active in that interval under
-`rule` (`:any` or `:all`). Static vertex and edge attributes are copied.
+`rule` (`:any` or `:all`).
+
+Because vertex IDs are stable, everything the static target can hold survives:
+directedness, `loops`, two-mode metadata, static vertex/edge/network
+attributes, and the full missing-dyad mask. Spells, time-varying attributes
+and the observation window are dropped by nature; pass `report=true` for
+`(net, ::Networks.ConversionReport)` naming them.
 """
 function network_collapse(dnet::DynamicNetwork{T, Time};
                           onset=nothing, terminus=nothing,
-                          rule::Symbol=:any) where {T, Time}
+                          rule::Symbol=:any, report::Bool=false) where {T, Time}
     edge_active = if isnothing(onset) || isnothing(terminus)
         spells -> !isempty(spells)
     else
@@ -719,7 +794,8 @@ function network_collapse(dnet::DynamicNetwork{T, Time};
                            for s in spells))
     end
 
-    return _extract(dnet, _ -> true, edge_active, true)
+    net, rep = _extract(dnet, _ -> true, edge_active, true)
+    return report ? (net, rep) : net
 end
 
 """
@@ -868,20 +944,40 @@ end
 # =============================================================================
 
 """
-    as_dynamic_network(net::Network; onset=0.0, terminus=1.0) -> DynamicNetwork
+    as_dynamic_network(net::Network; onset=0.0, terminus=1.0, report=false) -> DynamicNetwork
 
 Convert a static network to a dynamic network with all elements active
 during the specified period. Mixed numeric `onset`/`terminus` types are
 promoted (e.g. `onset=0, terminus=10.0` gives a `Float64` time axis);
 `DateTime`/`Date` values give a calendar time axis.
+
+# Conversion invariants
+
+This direction is **lossless**: a `DynamicNetwork` wraps a `Network`, so the
+whole source object is carried into it by `copy` — directedness, the `loops`
+flag, two-mode metadata, vertex, edge and network attributes, and the
+missing-dyad mask (a dyad that was unobserved statically is unobserved for the
+whole observation window). Every vertex and every edge gets the single spell
+`[onset, terminus)`, and the observation window is set to it, so
+`network_collapse(as_dynamic_network(net))` reproduces `net`.
+
+`report=true` returns `(dnet, ::Networks.ConversionReport)`; the report is
+lossless.
 """
-function as_dynamic_network(net::Network{T}; onset=0.0, terminus=1.0) where T
+function as_dynamic_network(net::Network{T}; onset=0.0, terminus=1.0,
+                            report::Bool=false) where T
     Time = promote_type(typeof(onset), typeof(terminus))
     onset, terminus = convert(Time, onset), convert(Time, terminus)
     dnet = DynamicNetwork{T, Time}(Int(nv(net));
                                    observation_start=onset,
                                    observation_end=terminus,
                                    directed=is_directed(net))
+
+    # Carry the *whole* static object into the base network: attributes, the
+    # loops/two-mode flags, and the missing-dyad mask. Rebuilding a bare
+    # Network from the vertex count (as this used to) silently discarded all
+    # of them, and dropped self-loops outright when `loops=true`.
+    dnet.network = copy(net)
 
     spell = Spell(onset, terminus)
 
@@ -895,7 +991,8 @@ function as_dynamic_network(net::Network{T}; onset=0.0, terminus=1.0) where T
         add_spell!(dnet, spell; edge=(T(src(e)), T(dst(e))))
     end
 
-    return dnet
+    rep = ConversionReport(:Network, :DynamicNetwork)
+    return report ? (dnet, rep) : dnet
 end
 
 """

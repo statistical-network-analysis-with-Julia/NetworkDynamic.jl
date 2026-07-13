@@ -23,11 +23,11 @@ This package is a Julia port of the R `networkDynamic` package from the StatNet 
 ## Installation
 
 Requires Julia 1.12+. NetworkDynamic.jl depends on the unregistered
-[Network.jl](https://github.com/statistical-network-analysis-with-Julia/Network.jl) package, which must be added first:
+[Networks.jl](https://github.com/statistical-network-analysis-with-Julia/Networks.jl) package, which must be added first:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Networks.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl")
 ```
 
@@ -145,8 +145,8 @@ w = get_edge_attribute_active(dnet, i, j, :weight, 2.0)
 ## Conversion
 
 ```julia
-# Static to dynamic (Network.jl network -> DynamicNetwork)
-using Network
+# Static to dynamic (Networks.jl network -> DynamicNetwork)
+using Networks
 static_net = network(5)
 add_edge!(static_net, 1, 2)
 dnet2 = as_dynamic_network(static_net; onset=0.0, terminus=10.0)

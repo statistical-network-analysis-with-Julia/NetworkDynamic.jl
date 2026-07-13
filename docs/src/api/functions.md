@@ -17,6 +17,7 @@ activate_edges!
 
 ```@docs
 remove_spell!
+deactivate!
 merge_spells!
 ```
 
@@ -35,6 +36,8 @@ get_activity_range
 
 ```@docs
 is_active
+get_vertex_activity
+get_edge_activity
 ```
 
 ### Active Element Listing

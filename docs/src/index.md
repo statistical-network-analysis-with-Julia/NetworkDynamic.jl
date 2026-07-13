@@ -50,7 +50,7 @@ Dynamic network data structures are foundational for:
 - **Time-varying attributes**: Store attributes that change over time
 - **Network extraction**: Extract static network snapshots at any time point or over intervals
 - **Spell operations**: Add, remove, merge, and query activity spells
-- **Graphs.jl integration**: Built on Network.jl, which implements the Graphs.jl interface
+- **Graphs.jl integration**: Built on Networks.jl, which implements the Graphs.jl interface
 - **Flexible timestamps**: Supports `Float64`, `DateTime`, `Date`, and other ordered types
 - **Conversion utilities**: Convert between static and dynamic networks
 
@@ -58,7 +58,7 @@ Dynamic network data structures are foundational for:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Networks.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl")
 ```
 
@@ -106,7 +106,7 @@ println("Edge spells: ", info.n_edge_spells)
 
 | Package | Role |
 |---------|------|
-| **Network.jl** | Static network data structure (dependency) |
+| **Networks.jl** | Static network data structure (dependency) |
 | **NetworkDynamic.jl** | Dynamic network data structure (this package) |
 | **TERGM.jl** | Temporal ERGM models (uses NetworkDynamic for data) |
 | **TSNA.jl** | Temporal SNA descriptive analysis (uses NetworkDynamic for data) |
@@ -155,3 +155,9 @@ Spells follow interval algebra rules:
 3. Bender-deMoll, S., Morris, M. (2012). `networkDynamic`: Dynamic extensions for network objects. R package.
 
 4. Holme, P., Saramaki, J. (2012). Temporal networks. *Physics Reports*, 519(3), 97-125.
+
+## Module
+
+```@docs
+NetworkDynamic
+```

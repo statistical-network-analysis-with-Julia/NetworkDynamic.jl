@@ -8,7 +8,7 @@ Install NetworkDynamic.jl from GitHub:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Networks.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl")
 ```
 
@@ -194,7 +194,7 @@ spells = when_edge(dnet, 1, 2)
 ### At a Single Time Point
 
 ```julia
-using Network   # for nv/ne on the extracted static network
+using Networks   # for nv/ne on the extracted static network
 
 # Extract static network at time 25
 snapshot = network_extract(dnet, 25.0)
@@ -332,7 +332,7 @@ println("Edge spells: ", info.n_edge_spells)
 ### Static to Dynamic
 
 ```julia
-using Network
+using Networks
 
 # Create a static network
 net = network(4; directed=true)

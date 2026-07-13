@@ -27,6 +27,14 @@ downstream packages (TSNA.jl) memoize derived indexes.
 
 ### Added
 
+- **Conversion invariants, published and enforced** (issue #1). Every
+  `Network` ↔ `DynamicNetwork` path now has an explicit, tested contract; the
+  table lives in Networks.jl `docs/src/guide/conversion_invariants.md`.
+  `as_dynamic_network`, `network_extract` and `network_collapse` accept
+  `report=true` and return `(result, ::Networks.ConversionReport)` naming
+  every field they could not carry (spells, TEAs, the observation window,
+  two-mode metadata under renumbering, mask entries on dropped vertices).
+
 - `deactivate!(dnet, onset, terminus; vertex=, edge=)` — removes activity in
   `[onset, terminus)`, truncating or splitting existing spells while
   preserving censoring flags on the surviving fragments.
@@ -43,6 +51,22 @@ downstream packages (TSNA.jl) memoize derived indexes.
   now copies vertex and edge attributes onto the collapsed network.
 - Censoring-aware `show` for `Spell` and `DynamicNetwork`;
   `Base.hash(::Spell)`.
+
+### Fixed
+
+- **`as_dynamic_network` silently discarded everything but the vertex count,
+  directedness and the edge set.** It rebuilt a bare `Network` from `nv(net)`,
+  so vertex, edge and network attributes, the `loops` and two-mode flags and
+  the **missing-dyad mask** all vanished — a masked network round-tripped to
+  zero masked dyads. With `loops=true` it was worse than lossy: a self-loop was
+  recorded as an edge *spell* while `add_edge!` refused it on the freshly built
+  loop-less base network, leaving the two inconsistent. It now carries the whole
+  static object across with `copy`, and is lossless.
+- **`network_extract` / `network_collapse` dropped the missing-dyad mask, the
+  network-level attributes and the `loops` flag.** They now preserve all three
+  (and two-mode metadata when vertex IDs are stable). An unobserved dyad of the
+  base network is unobserved in every snapshot of it; mask entries whose
+  endpoints an extraction drops are reported, not silently lost.
 
 ### Changed
 

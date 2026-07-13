@@ -31,6 +31,15 @@ The entire package lives in a single file: `src/NetworkDynamic.jl`.
 4. **Time-varying attributes** -- `set_vertex_attribute_active!`, `get_vertex_attribute_active!`, and edge equivalents
 5. **Conversion/reconciliation** -- `as_dynamic_network`, `reconcile_activity!`
 
+### Conversion invariants
+
+Both directions between `Network` and `DynamicNetwork` honour the **ecosystem conversion contract** (Networks.jl `src/conversion.jl`): preserve what the target can represent, reject or policy-gate what it cannot, report what was dropped. The full per-path table for the whole ecosystem is `Networks.jl/docs/src/guide/conversion_invariants.md`.
+
+- **`as_dynamic_network` is lossless.** A `DynamicNetwork` *wraps* a `Network`, so the whole static object is carried in by `copy` — directedness, the `loops` flag, two-mode metadata, vertex/edge/network attributes, and the **missing-dyad mask**. It used to rebuild a bare `Network` from `nv(net)`, which silently discarded all of them (a masked network round-tripped to zero masked dyads) and, with `loops=true`, left a self-loop recorded as an edge *spell* while `add_edge!` refused it on the loop-less base network.
+- **`network_extract` / `network_collapse` preserve everything a static network can hold**: directedness, `loops`, static vertex/edge/network attributes, and the missing-dyad mask (an unobserved dyad of the base network is unobserved in every snapshot of it — it must not become an absent tie). Two-mode metadata survives only under `retain_all_vertices=true`; renumbering to `1:k` destroys the "vertices `1:k` are mode 1" invariant that the flag encodes.
+- What a static network *cannot* hold — spells, TEAs, the observation window, plus mask entries whose endpoints an extraction drops — is named in a `Networks.ConversionReport`: pass `report=true` to get `(net, rep)` and inspect `dropped_fields(rep)` / `is_lossless(rep)`.
+- Pinned by the six "Conversion invariants: ..." testsets in `test/runtests.jl`, which cover directed and undirected, with/without attributes, masked dyads with a **present** face value *and* an **absent** one, self-loops, isolates, two-mode networks, overlapping spells, point spells, and observation-window boundaries.
+
 ### Design Patterns
 
 - Keyword dispatch: most functions take `vertex=` or `edge=` keyword arguments to select the target element, throwing `ArgumentError` if neither is provided.
@@ -40,13 +49,13 @@ The entire package lives in a single file: `src/NetworkDynamic.jl`.
 
 ## Key Dependencies
 
-- **Network.jl** -- Local/sibling package (via `[sources]` path dependency at `../Network.jl`); provides the static network type that `DynamicNetwork` wraps.
+- **Networks.jl** -- Local/sibling package (via `[sources]` path dependency at `../Networks.jl`); provides the static network type that `DynamicNetwork` wraps.
 - **Graphs.jl** -- Julia standard graph interface; `DynamicNetwork` forwards core methods to it.
 - **Dates** -- stdlib; supports `DateTime`/`Date` as timestamp types.
 
 ## Conventions
 
-- Julia 1.12+ required (Network.jl cannot load on earlier versions).
+- Julia 1.12+ required (Networks.jl cannot load on earlier versions).
 - Mutating functions use `!` suffix (e.g., `activate!`, `reconcile_activity!`).
 - All public API is exported at the top of the module file.
 - Docstrings use the standard Julia triple-quote format with `# Fields` / `# Type Parameters` sections.

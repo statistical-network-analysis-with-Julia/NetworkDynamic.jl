@@ -192,7 +192,7 @@ static = network_collapse(dnet)
 Convert an existing static `Network` to a `DynamicNetwork`:
 
 ```julia
-using Network
+using Networks
 
 # Create static network
 net = network(5; directed=true)
@@ -274,7 +274,7 @@ end
 When you have a sequence of static networks at fixed time points:
 
 ```julia
-using Network
+using Networks
 using Graphs: src, dst
 
 # Suppose you have networks at times 1, 2, 3
