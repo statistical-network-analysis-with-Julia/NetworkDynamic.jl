@@ -156,6 +156,22 @@ Spells follow interval algebra rules:
 
 4. Holme, P., Saramaki, J. (2012). Temporal networks. *Physics Reports*, 519(3), 97-125.
 
+
+## Citation
+
+If you use NetworkDynamic.jl in your work, please cite it using the entry in
+[`CITATION.bib`](https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl/blob/main/CITATION.bib):
+
+```biblatex
+@misc{SNWJNetworkDynamicJL,
+  author = {{Statistical Network Analysis with Julia}},
+  title = {NetworkDynamic.jl: Dynamic Network Data Structures for Julia},
+  year = {2026},
+  url = {https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl},
+  note = {Homepage: https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl; GitHub: https://github.com/statistical-network-analysis-with-Julia}
+}
+```
+
 ## Module
 
 ```@docs

@@ -184,6 +184,21 @@ For more detailed documentation, see:
 
 2. Almquist, Z.W., & Butts, C.T. (2014). Logistic Network Regression for Scalable Analysis of Networks with Joint Edge/Vertex Dynamics. *Sociological Methodology*, 44(1), 273-321.
 
+## Citation
+
+If you use NetworkDynamic.jl in your work, please cite it using the entry in
+[`CITATION.bib`](CITATION.bib):
+
+```biblatex
+@misc{SNWJNetworkDynamicJL,
+  author = {{Statistical Network Analysis with Julia}},
+  title = {NetworkDynamic.jl: Dynamic Network Data Structures for Julia},
+  year = {2026},
+  url = {https://github.com/statistical-network-analysis-with-Julia/NetworkDynamic.jl},
+  note = {Homepage: https://statistical-network-analysis-with-Julia.github.io/NetworkDynamic.jl; GitHub: https://github.com/statistical-network-analysis-with-Julia}
+}
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
