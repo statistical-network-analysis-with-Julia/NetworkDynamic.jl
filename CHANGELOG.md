@@ -83,6 +83,8 @@ downstream packages (TSNA.jl) memoize derived indexes.
 
 ### Changed
 
+- Documentation uses the default Documenter themes, with a new package-specific
+  SVG icon and browser favicon in the official Julia logo colors.
 - `spell_overlap` has explicit point-spell semantics; touching half-open
   intervals (`[0,10)` / `[10,20)`) do not overlap.
 - `merge_spells!` and `reconcile_activity!` propagate censoring flags to
